@@ -33,7 +33,7 @@ def constrain_index(x, array_len):
     return min(i, array_len - 1)
 
 
-def convert_to_image(array, resize_factor=2):
+def convert_to_image(array, resize_factor=1):
     array = array.copy()
 
     maximum = array.max()
