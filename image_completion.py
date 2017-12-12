@@ -4,7 +4,7 @@ from functools import partial
 import numpy as np
 from PIL import Image
 
-from utils import min_max_slice, coordinates, random_sample, constrain_index, slice_centered_in
+from utils import min_max_slice, coordinates, random_sample, constrain_index, slice_centered_in, discard_channels
 
 
 def find_edge(is_empty):
@@ -28,7 +28,7 @@ def compute_ssd(target, candidate, is_empty, patch_side_len):
     offset = 2 * patch_side_len  # can't put the target patch right on the edge because it will overflow
     ssd_matrix = np.zeros((candidate.shape[0] - offset, candidate.shape[1] - offset), np.uint64)
 
-    target = target.astype(np.uint16)  # coerce into uint16 because we square uint8
+    target = target.astype(np.int32)  # coerce into uint16 because we square uint8
     is_valid = ~is_empty  # valid only if pixel is not empty
 
     for target_row, target_col in zip(*is_valid.nonzero()):  # go through every target patch pixel that is filled
@@ -49,16 +49,23 @@ def copy_patch(destination, destination_center, source, source_center, is_fillab
         source_row  = r + source_center[0]
         source_col  = c + source_center[1]
 
-        destination[destination_row, destination_col] = source[source_row, source_col]
+        try:
+            destination[destination_row, destination_col] = source[source_row, source_col]
+        except IndexError:
+            continue
 
 
-def preprocess_image(image_path, hole_path, search_path, patch_size):
+def read_images(image_path, hole_path, search_path, patch_size, as_greyscale=False):
     # open image to fill
     im = Image.open(image_path)
+    if as_greyscale:
+        im = im.convert('L')
     im_array = np.asarray(im)
 
     # open where to fill
     hole_mask = np.asarray(Image.open(hole_path), bool)
+    hole_mask = discard_channels(hole_mask)
+
     hole_indices = hole_mask.nonzero()
     assert ((min(hole_indices[0]) >= patch_size) and
             (max(hole_indices[0]) < im_array.shape[0] - patch_size) and
@@ -71,8 +78,11 @@ def preprocess_image(image_path, hole_path, search_path, patch_size):
 
     # where to look for replacements
     searchable_mask = np.asarray(Image.open(search_path), bool)
+    searchable_mask = discard_channels(searchable_mask)
+    searchable_mask[hole_mask] = False  # can't search where there is a hole
+
     search_indices = searchable_mask.nonzero()
-    searchable = im_array[min_max_slice(search_indices[0]), min_max_slice(search_indices[1])]
+    searchable = punctured_im[min_max_slice(search_indices[0]), min_max_slice(search_indices[1])]
     assert ((searchable.shape[0] > 2 * patch_size + 1) and
             (searchable.shape[1] > 2 * patch_size + 1)), 'Texture image is smaller than patch size'
 
